@@ -6,6 +6,7 @@ import sys
 
 from githubcheck import Annotation, Check
 from githubcheck import Flake8
+from githubcheck import Sphinx
 
 
 def batched(elements, batch_size):
@@ -48,6 +49,29 @@ def post_flake8_check(check, args):
         conclusion = 'failure'
     else:
         conclusion = 'success'
+    check.complete(conclusion, output)
+
+
+def post_sphinx_check(check, args):
+    output = {'title': 'Sphinx',
+              'summary': 'processing'}
+    check.start('in_progress', output)
+    MAX_ANNOTATIONS_PER_REQ = 50
+    annotations = []
+    parser = Sphinx(args.sphinx_root, 'sphinx')
+
+    for m in parser.scan(args.sphinx_output):
+        assert isinstance(m, Annotation)
+        annotations.append(m)
+
+    output['summary'] = '{} issues found'.format(len(annotations))
+    for batch in batched(annotations, MAX_ANNOTATIONS_PER_REQ):
+        output['annotations'] = [a.to_dict() for a in batch]
+        check.update(output)
+        del output['annotations']
+
+    output['text'] = parser.summary
+    conclusion = parser.conclusion
     check.complete(conclusion, output)
 
 
@@ -107,6 +131,18 @@ def main():
                             type=argparse.FileType('r'),
                             default=sys.stdin)
 
+    sphinx_group = parser.add_argument_group('sphinx')
+    sphinx_group.add_argument('--sphinx',
+                              help=('translate sphinx build warnings to '
+                                    'annotations'),
+                              action='store_true')
+    sphinx_group.add_argument('--sphinx-root',
+                              help='root to project')
+    lint_group.add_argument('--sphinx-output',
+                            help='path to the messages from sphinx-build',
+                            type=argparse.FileType('r'),
+                            default=sys.stdin)
+
     args = parser.parse_args()
 
     check = Check(args.owner, args.repo, args.name,
@@ -117,6 +153,8 @@ def main():
             parser.error("please specify '--lint-tox-dir' "
                          "if '--link' is specified")
         post_flake8_check(check, args)
+    elif args.sphinx:
+        post_sphinx_check(check, args)
     elif args.status == 'completed':
         if args.conclusion is None:
             parser.error("please specify '--conclusion' "
