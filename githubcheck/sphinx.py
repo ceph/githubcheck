@@ -16,9 +16,10 @@ class Parser:
         self.problem_re = r'build finished with problems'
         base_dir = os.path.abspath(base_dir)
         # ... /<path>/doc/foo.rst:108: WARNING: something goes wrong!
+        # ... /<path>/doc/foo.rst:108:<confval>:4: WARNING: something goes wrong!
         warning_re1 = (f'{base_dir}/'
                        r'(?P<path>[^:]+):'
-                       r'(?P<lineno>\d+):\s'
+                       r'(?P<lineno>\d+):\S*\s'
                        r'(?P<level>WARNING|ERROR):\s'
                        r'(?P<message>.+)$')
         self.warning_re1 = re.compile(warning_re1)
@@ -38,35 +39,47 @@ class Parser:
         else:
             return AnnotationLevel.NOTICE
 
+    def _match_with_re1(self, line):
+        matched = self.warning_re1.search(line)
+        if matched is None:
+            return None
+        path = matched.group('path')
+        lineno = int(matched.group('lineno'))
+        level = matched.group('level')
+        message = matched.group('message')
+        return Annotation(path,
+                          lineno, lineno,
+                          self._parse_level(level),
+                          message,
+                          None, None,
+                          title=self.title,
+                          raw_details=line)
+
+    def _match_with_re2(self, line):
+        matched = self.warning_re2.search(line)
+        if matched is None:
+            return None
+        path = matched.group('path')
+        level = matched.group('level')
+        message = matched.group('message')
+        return Annotation(path,
+                          0, 0,
+                          self._parse_level(level),
+                          message,
+                          None, None,
+                          title=self.title,
+                          raw_details=line)
+
     def scan(self, output):
         last_line = None
         for line in output:
-            matched = self.warning_re1.search(line)
-            if matched:
-                path = matched.group('path')
-                lineno = int(matched.group('lineno'))
-                level = matched.group('level')
-                message = matched.group('message')
-                yield Annotation(path,
-                                 lineno, lineno,
-                                 self._parse_level(level),
-                                 message,
-                                 None, None,
-                                 title=self.title,
-                                 raw_details=line)
+            annotation = self._match_with_re1(line)
+            if annotation is not None:
+                yield annotation
                 continue
-            matched = self.warning_re2.search(line)
-            if matched:
-                path = matched.group('path')
-                level = matched.group('level')
-                message = matched.group('message')
-                yield Annotation(path,
-                                 0, 0,
-                                 self._parse_level(level),
-                                 message,
-                                 None, None,
-                                 title=self.title,
-                                 raw_details=line)
+            annotation = self._match_with_re2(line)
+            if annotation is not None:
+                yield annotation
                 continue
             last_line = line
         if re.match(self.succeed_re, last_line):
